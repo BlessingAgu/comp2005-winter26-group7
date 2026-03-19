@@ -1,5 +1,3 @@
-
-
 import java.awt.*;
 import java.awt.event.*;
 import javax.swing.*;
@@ -51,7 +49,12 @@ public class BlokusGame extends JFrame implements ActionListener
 	
 	// Preview
 	private int previewRow = -1;
-	private int previewCol = -1; // SAYING ITS NOT USED
+	private int previewCol = -1;
+	
+	// track consecutive passes 
+	private int consecutivePasses = 0;
+	private boolean[] lastPieceWasMono;
+	
 	
 	// Piece data
 	private static final String[] PIECE_IDS = {
@@ -84,7 +87,6 @@ public class BlokusGame extends JFrame implements ActionListener
 			this.playerNames = new String[]{"Player 1", "Player 2", "Player 3", "Player 4"};
 		}
 		
-		
 		currentPlayer = 1;
 		gameActive = false;
 		hasPlacedFirstPiece = new boolean[4];
@@ -92,6 +94,10 @@ public class BlokusGame extends JFrame implements ActionListener
 		selectedPieceIndex = 0;
 		selectedPieceType = PIECE_IDS[0];
 		pieceRotation = 0;
+		
+		//initialise tracking arrays
+		lastPieceWasMono = new boolean[4];
+		consecutivePasses = 0;
 		
 		startingCorners = new int[4][2];
 		startingCorners[0] = new int[]{0, 0};
@@ -127,11 +133,17 @@ public class BlokusGame extends JFrame implements ActionListener
 		topPanel.add(newGameButton);
 		topPanel.add(rotateButton);
 		
+		// Pass Turn button 
+		JButton passButton = new JButton("Pass Turn");
+		passButton.addActionListener(e -> passTurn());
+		topPanel.add(passButton);
+		
+		
 		// Options button for OptionsMenu (hints and Color Mode)
 		try {
 			Class.forName("OptionsMenu");
 			JButton optionsButton = new JButton("Options");
-			optionsButton.addActionListener(e -> { // HALLE CHANGED THIS FOR NEW COLORPALETTE CLASS
+			optionsButton.addActionListener(e -> {
     			new OptionsMenu();
 			});
 			topPanel.add(optionsButton);
@@ -190,7 +202,7 @@ public class BlokusGame extends JFrame implements ActionListener
 		}
 	}
 	
-	private void startNewGame()
+	public void startNewGame()
 	{
 		for (int row = 0; row < boardSize; row++)
 		{
@@ -213,6 +225,11 @@ public class BlokusGame extends JFrame implements ActionListener
 				piecesUsed[i][j] = false;
 			}
 		}
+		
+		// reset end-game 
+		consecutivePasses = 0;
+		lastPieceWasMono  = new boolean[4];
+		
 		
 		updatePieceButtons();
 		statusLabel.setText(getPlayerDisplayName(currentPlayer) + " - Select piece");
@@ -283,7 +300,6 @@ public class BlokusGame extends JFrame implements ActionListener
 	{
 		if (!gameActive) return;
 		
-		// Don't show preview for already used pieces
 		if (piecesUsed[currentPlayer - 1][selectedPieceIndex])
 		{
 			return;
@@ -304,7 +320,6 @@ public class BlokusGame extends JFrame implements ActionListener
 				if (valid)
 				{
 					boardSquares[r][c].setBorder(BorderFactory.createLineBorder(Color.GREEN, 3));
-					// Use color palette, otherwise use simple light colors
 					Color previewColor = getPreviewColor(currentPlayer);
 					boardSquares[r][c].setBackground(previewColor);
 				}
@@ -316,20 +331,18 @@ public class BlokusGame extends JFrame implements ActionListener
 		}
 	}
 	
-	// Gets preview color, uses BoardSquareColors if available
 	private Color getPreviewColor(int player)
 	{
 		try {
 			Class.forName("BoardSquareColors");
 			return BoardSquareColors.getLightColorForPlayer(player);
 		} catch (ClassNotFoundException e) {
-			
 			switch (player)
 			{
-				case 1: return new Color(255, 200, 200); // Light red
-				case 2: return new Color(200, 200, 255); // Light blue
-				case 3: return new Color(200, 255, 200); // Light green
-				case 4: return new Color(255, 255, 200); // Light yellow
+				case 1: return new Color(255, 200, 200);
+				case 2: return new Color(200, 200, 255);
+				case 3: return new Color(200, 255, 200);
+				case 4: return new Color(255, 255, 200);
 				default: return Color.WHITE;
 			}
 		}
@@ -359,7 +372,6 @@ public class BlokusGame extends JFrame implements ActionListener
 		
 		int row = square.getRow(), col = square.getCol();
 		
-		// Check if piece has already been used by current player
 		if (piecesUsed[currentPlayer - 1][selectedPieceIndex])
 		{
 			statusLabel.setText(getPlayerDisplayName(currentPlayer) + " - This piece already used! Select a different piece.");
@@ -382,14 +394,83 @@ public class BlokusGame extends JFrame implements ActionListener
 		pieceRotation = 0;
 		clearPreview();
 		
+		//     Track whether this player's last piece was the monomino 
+		consecutivePasses = 0;
+		lastPieceWasMono[currentPlayer - 1] = (selectedPieceIndex == 0);
+		
+		if (allPiecesUsed())
+		{
+			endGame();
+			return;
+		}
+		
 		currentPlayer = (currentPlayer % 4) + 1;
 		updatePieceButtons();
 		statusLabel.setText(getPlayerDisplayName(currentPlayer) + " - Select piece");
 	}
 	
+	// passturn
+	private void passTurn()
+	{
+		if (!gameActive) return;
+		
+		consecutivePasses++;
+		statusLabel.setText(getPlayerDisplayName(currentPlayer) + " passed.");
+		
+		if (consecutivePasses >= 4)
+		{
+			endGame();
+			return;
+		}
+		
+		currentPlayer = (currentPlayer % 4) + 1;
+		updatePieceButtons();
+		statusLabel.setText(statusLabel.getText() + "  |  " +
+			getPlayerDisplayName(currentPlayer) + " - Select piece or Pass Turn");
+	}
+	
+	// ends game and scores it
+	private void endGame()
+	{
+		gameActive = false;
+		
+		for (int row = 0; row < boardSize; row++)
+		{
+			for (int col = 0; col < boardSize; col++)
+			{
+				boardSquares[row][col].setEnabled(false);
+			}
+		}
+		
+		statusLabel.setText("Game Over! Calculating scores...");
+		
+		try
+		{
+			Class.forName("ScoringSystem");
+			ScoringSystem.showResults(piecesUsed, lastPieceWasMono, playerNames, this);
+		}
+		catch (ClassNotFoundException e)
+		{
+			// ScoringSystem not present — basic fallback so game still works
+			statusLabel.setText("Game Over! Click 'New Game' to play again.");
+			JOptionPane.showMessageDialog(this,
+				"Game Over!\nClick 'New Game' to play again.",
+				"Game Over",
+				JOptionPane.INFORMATION_MESSAGE);
+		}
+	}
+	
+	// returns true only when every piece for every player is used.
+	private boolean allPiecesUsed()
+	{
+		for (int p = 0; p < 4; p++)
+			for (int i = 0; i < 21; i++)
+				if (!piecesUsed[p][i]) return false;
+		return true;
+	}
+	
 	private boolean canPlacePiece(int row, int col, int[][] shape)
 	{
-		// Check bounds and overlap
 		for (int[] sq : shape)
 		{
 			int r = row + sq[0], c = col + sq[1];
@@ -397,7 +478,6 @@ public class BlokusGame extends JFrame implements ActionListener
 			if (!boardSquares[r][c].isEmpty()) return false;
 		}
 		
-		// First piece must cover corner
 		if (!hasPlacedFirstPiece[currentPlayer - 1])
 		{
 			int[] corner = startingCorners[currentPlayer - 1];
@@ -409,7 +489,6 @@ public class BlokusGame extends JFrame implements ActionListener
 			return false;
 		}
 		
-		// Must touch corner, not edge
 		boolean touchesCorner = false;
 		for (int[] sq : shape)
 		{
@@ -422,7 +501,6 @@ public class BlokusGame extends JFrame implements ActionListener
 		}
 		if (!touchesCorner) return false;
 		
-		// Check no edge contact
 		for (int[] sq : shape)
 		{
 			int r = row + sq[0], c = col + sq[1];
